@@ -71,7 +71,7 @@ async def assign_host_for_request(host_sku: int, request_id: int = Query(...), c
     return {'result': 'success'}
 
 
-@app.post('/get_hosts_load', tags=['admin_actions'], response_model=Dict[str, List[LoadsHost]])
+@app.get('/get_hosts_load', tags=['admin_actions'], response_model=Dict[str, List[LoadsHost]])
 async def get_hosts_load(current_user: User = Depends(is_admin)):
     """Получить хосты и их загруженность"""
     result = await get_hosts_and_loads(database)
