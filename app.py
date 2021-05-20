@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
+import os
 from typing import List, Dict
 
 import uvicorn
 from fastapi import FastAPI, Query, Depends
+from dotenv import load_dotenv
 
 from auth import get_current_user, auth_router, is_admin
 from schemas import Host, VmReservation, User, ReservationStatusForUser, EditHost, HostAdd, LoadsHost
@@ -10,7 +12,7 @@ from db_models import database
 from db_helper import add_new_host, get_host_info, get_my_vps_requests, change_my_request_status, reject_requests, \
     get_pending_requests_list, assign_host_with_verification, edit_host_config, get_hosts_and_loads, auto_allocate_requests, add_task
 
-
+load_dotenv()
 app = FastAPI(description="Веб-сервис для планирования количества ресурсов и "
                           "аппаратных хостов на базе поступающих заявок.", title='Otus. Проектная работа')
 
@@ -109,5 +111,7 @@ async def change_my_vps_request_status(new_status: ReservationStatusForUser, req
 app.include_router(auth_router)
 
 if __name__ == '__main__':
-    uvicorn.run('app:app', host='0.0.0.0', port=8000)
+    API_HOST = os.getenv('API_HOST', '0.0.0.0')
+    API_PORT = int(os.getenv('API_PORT', 8000))
+    uvicorn.run('app:app', host=API_HOST, port=API_PORT)
 

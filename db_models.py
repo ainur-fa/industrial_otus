@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import os
+
 import databases
 from sqlalchemy import Column, Integer, String, ForeignKey, Table, TIMESTAMP, Boolean, create_engine
 from sqlalchemy.orm import relationship
@@ -7,7 +9,7 @@ from sqlalchemy.sql import func
 
 
 Base = declarative_base()
-DATABASE_URL = "sqlite:///./sqlite_db.db"
+DATABASE_URL = os.getenv('DATABASE_URL', "sqlite:///./sqlite_db.db")
 
 database = databases.Database(DATABASE_URL)
 metadata = Base.metadata
