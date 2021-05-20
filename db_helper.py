@@ -26,9 +26,6 @@ async def add_new_host(db, host_schema):
 
 
 async def revision_tasks(db, host_item):
-    assigned_requests = await get_assigned_requests(db, host_item)
-    request_ids = [request.id for request in assigned_requests]
-    print(request_ids)
     query = vm_reservation.update().where(vm_reservation.c.assigned_to_host == host_item.sku).values(
         status=ReservationStatus.in_consideration, assigned_to_host=None)
     await db.execute(query)
@@ -172,7 +169,7 @@ async def get_my_vps_requests(db, username):
 async def get_pending_requests_list(db):
     query = vm_reservation.select().where(vm_reservation.c.status == ReservationStatus.in_consideration)
     pending_requests = await db.fetch_all(query)
-    return [VmReservation(**item) for item in pending_requests]
+    return pending_requests
 
 
 async def reject_requests(db, request_id, description):
@@ -211,8 +208,7 @@ async def get_resources_info(db, host_obj):
     return free_ram, storages_info, cpu_cores
 
 
-async def verify_requirements(db, client_request, sku):
-    host_obj = await get_host(db, sku)
+async def verify_requirements(db, client_request, host_obj):
     if host_obj.status != HostStatus.active:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"host is not active")
 
@@ -235,12 +231,19 @@ async def verify_requirements(db, client_request, sku):
     return (False, errors) if errors else (True, errors)
 
 
-async def assign_host(db, request_id, host_sku):
+async def assign_task_to_host(db, task_id, host_sku):
+    return await db.execute(
+        vm_reservation.update().where(vm_reservation.c.id == task_id).values(assigned_to_host=host_sku,
+                                                                             status=ReservationStatus.completed))
+
+
+async def assign_host_with_verification(db, request_id, host_sku):
     client_request = await db.fetch_one(vm_reservation.select().where(vm_reservation.c.id == request_id))
-    passed, msg = await verify_requirements(db, client_request, host_sku)
+    host_obj = await get_host(db, host_sku)
+
+    passed, msg = await verify_requirements(db, client_request, host_obj)
     if passed:
-        return await db.execute(
-            vm_reservation.update().where(vm_reservation.c.id == request_id).values(assigned_to_host=host_sku))
+        return await assign_task_to_host(db, client_request.id, host_obj.sku)
     else:
         raise HTTPException(status_code=status.HTTP_406_NOT_ACCEPTABLE, detail=", ".join(msg))
 
@@ -250,9 +253,14 @@ def get_loads(total, free, round_val=2):
     return round(used * 100 / total, round_val)
 
 
+async def get_active_hosts(db):
+    active_hosts = await db.fetch_all(host.select().where(host.c.status == HostStatus.active))
+    return active_hosts
+
+
 async def get_hosts_and_loads(db):
     stat = []
-    active_hosts = await db.fetch_all(host.select().where(host.c.status == HostStatus.active))
+    active_hosts = await get_active_hosts(db)
     for active_host in active_hosts:
         free_ram, storages_stat, cpu_cores = await get_resources_info(db, active_host)
 
@@ -261,7 +269,6 @@ async def get_hosts_and_loads(db):
             storage_info[storage_type] = {'total': storage_values['total'],
                                           'free': storage_values['free'],
                                           'loads_perc': get_loads(storage_values['total'], storage_values['free'])}
-        print(storage_info)
 
         res = LoadsHost(sku=active_host.sku, ram_status={'total': active_host.ram,
                                                          'free': free_ram,
@@ -271,3 +278,18 @@ async def get_hosts_and_loads(db):
         stat.append(res)
 
     return stat
+
+
+async def auto_allocate_requests(db):
+    tasks = await get_pending_requests_list(db)
+    active_hosts = await get_active_hosts(db)
+
+    success = 0
+    for active_host in active_hosts:
+        for task in tasks:
+            passed, msg = await verify_requirements(db, task, active_host)
+            if passed:
+                await assign_task_to_host(db, task.id, active_host.sku)
+                success += 1
+
+    return {'await': len(tasks), 'approved': success}

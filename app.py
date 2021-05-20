@@ -7,8 +7,8 @@ from fastapi import FastAPI, Query, Depends
 from auth import get_current_user, auth_router, is_admin
 from schemas import Host, VmReservation, User, ReservationStatusForUser, EditHost, HostAdd, LoadsHost
 from db_models import database
-from db_helper import add_new_host, add_task, get_host_info, get_my_vps_requests, change_my_request_status,\
-    get_pending_requests_list, reject_requests, assign_host, edit_host_config, get_hosts_and_loads
+from db_helper import add_new_host, get_host_info, get_my_vps_requests, change_my_request_status, reject_requests, \
+    get_pending_requests_list, assign_host_with_verification, edit_host_config, get_hosts_and_loads, auto_allocate_requests, add_task
 
 
 app = FastAPI(description="Веб-сервис для планирования количества ресурсов и "
@@ -51,7 +51,8 @@ async def edit_existing_host(item: EditHost, sku: int = Query(...), current_user
 async def get_pending_requests(current_user: User = Depends(is_admin)):
     """Получить заявки в рассмотрении"""
     pending_requests = await get_pending_requests_list(database)
-    return {'result': pending_requests}
+    result = [VmReservation(**item) for item in pending_requests]
+    return {'result': result}
 
 
 @app.post('/reject_pending_request', tags=['admin_actions'])
@@ -64,7 +65,7 @@ async def reject_pending_request(description: str, request_id: int = Query(...),
 @app.post('/assign_host_for_request', tags=['admin_actions'])
 async def assign_host_for_request(host_sku: int, request_id: int = Query(...), current_user: User = Depends(is_admin)):
     """Назначить хост для заявки"""
-    await assign_host(database, request_id, host_sku)
+    await assign_host_with_verification(database, request_id, host_sku)
     return {'result': 'success'}
 
 
@@ -75,8 +76,14 @@ async def get_hosts_load(current_user: User = Depends(is_admin)):
     return {'result': result}
 
 
-@app.post('/reserve_vps', response_model=VmReservation, response_model_exclude_unset=True,
-          response_model_exclude_none=True, response_model_exclude={"assigned_to_host"}, tags=['user_actions'])
+@app.post('/auto_allocate', tags=['admin_actions'])
+async def auto_allocate(current_user: User = Depends(is_admin)):
+    """Автоназначение хостов на заявки"""
+    result = await auto_allocate_requests(database)
+    return result
+
+
+@app.post('/reserve_vps', tags=['user_actions'])
 async def reserve_vps(item: VmReservation, current_user: User = Depends(get_current_user)):
     """Создать заявку на ВМ"""
     await add_task(database, item, current_user.login)
